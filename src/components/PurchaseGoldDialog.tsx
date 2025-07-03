@@ -22,11 +22,11 @@ const PurchaseGoldDialog = ({ currentUser, onPurchaseComplete }: PurchaseGoldDia
   const [loading, setLoading] = useState(false);
 
   const goldPackages = [
-    { id: 100, gold: 100, price: 0.99, bonus: 0, popular: false },
-    { id: 500, gold: 500, price: 4.99, bonus: 50, popular: false },
-    { id: 1000, gold: 1000, price: 9.99, bonus: 150, popular: true },
-    { id: 2500, gold: 2500, price: 19.99, bonus: 500, popular: false },
-    { id: 5000, gold: 5000, price: 39.99, bonus: 1250, popular: false },
+    { id: 100, gold: 100, price: 10, bonus: 0, popular: false },
+    { id: 500, gold: 500, price: 50, bonus: 50, popular: false },
+    { id: 1000, gold: 1000, price: 100, bonus: 150, popular: true },
+    { id: 2500, gold: 2500, price: 250, bonus: 500, popular: false },
+    { id: 5000, gold: 5000, price: 500, bonus: 1250, popular: false },
   ];
 
   const handlePackageSelect = (packageId: number) => {
@@ -78,7 +78,7 @@ const PurchaseGoldDialog = ({ currentUser, onPurchaseComplete }: PurchaseGoldDia
         return;
       }
 
-      console.log('Creating payment session with data:', requestData);
+      console.log('Creating payment session with Paystack:', requestData);
 
       // Create payment session
       const { data, error } = await supabase.functions.invoke('create-payment', {
@@ -96,7 +96,7 @@ const PurchaseGoldDialog = ({ currentUser, onPurchaseComplete }: PurchaseGoldDia
         throw new Error('No payment URL received');
       }
 
-      // Open Stripe checkout in a new tab
+      // Open Paystack checkout in a new tab
       window.open(data.url, '_blank');
       
       setIsOpen(false);
@@ -176,7 +176,7 @@ const PurchaseGoldDialog = ({ currentUser, onPurchaseComplete }: PurchaseGoldDia
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-yellow-400 mb-2">
-                      ${package_.price}
+                      ₦{package_.price}
                     </div>
                     <div className="text-sm text-gray-300">
                       Total: {(package_.gold + package_.bonus).toLocaleString()} Gold
@@ -210,11 +210,11 @@ const PurchaseGoldDialog = ({ currentUser, onPurchaseComplete }: PurchaseGoldDia
                       className="bg-gray-700 border-gray-600 text-white"
                     />
                     <div className="flex items-center text-gray-300 min-w-fit">
-                      = ${customAmount ? (parseInt(customAmount) * 0.01).toFixed(2) : "0.00"}
+                      = ₦{customAmount ? (parseInt(customAmount) * 0.1).toFixed(2) : "0.00"}
                     </div>
                   </div>
                   <div className="text-sm text-gray-400">
-                    Rate: $0.01 per Gold
+                    Rate: ₦0.10 per Gold
                   </div>
                 </div>
               </CardContent>
@@ -241,7 +241,7 @@ const PurchaseGoldDialog = ({ currentUser, onPurchaseComplete }: PurchaseGoldDia
 
           {/* Disclaimer */}
           <div className="text-xs text-gray-400 text-center border-t border-gray-700 pt-4">
-            <p>Payments are processed securely through Stripe.</p>
+            <p>Payments are processed securely through Paystack.</p>
             <p>Your gold will be added to your account after successful payment.</p>
           </div>
         </div>

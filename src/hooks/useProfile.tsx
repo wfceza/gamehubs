@@ -12,9 +12,11 @@ export function useProfile() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log('useProfile: user changed:', user);
     if (user) {
       fetchProfile();
     } else {
+      console.log('useProfile: no user, setting profile to null');
       setProfile(null);
       setLoading(false);
     }
@@ -22,6 +24,7 @@ export function useProfile() {
 
   const fetchProfile = async () => {
     if (!user) {
+      console.log('fetchProfile: no user available');
       setLoading(false);
       return;
     }
@@ -34,37 +37,57 @@ export function useProfile() {
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Error fetching profile:', error);
         // If profile doesn't exist, try to create one
-        if (error.code === 'PGRST116') {
-          console.log('Profile not found, creating new profile...');
-          const { data: newProfile, error: insertError } = await supabase
-            .from('profiles')
-            .insert({
-              id: user.id,
-              username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
-              email: user.email || '',
-              gold: 100
-            })
-            .select()
-            .single();
+        console.log('Profile not found, creating new profile...');
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: user.id,
+            username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
+            email: user.email || '',
+            gold: 100
+          })
+          .select()
+          .single();
 
-          if (insertError) {
-            console.error('Error creating profile:', insertError);
-          } else {
-            console.log('Profile created successfully:', newProfile);
-            setProfile(newProfile);
-          }
+        if (insertError) {
+          console.error('Error creating profile:', insertError);
+          setProfile(null);
+        } else {
+          console.log('Profile created successfully:', newProfile);
+          setProfile(newProfile);
         }
-      } else {
+      } else if (data) {
         console.log('Profile fetched successfully:', data);
         setProfile(data);
+      } else {
+        console.log('No profile found, creating new profile...');
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: user.id,
+            username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
+            email: user.email || '',
+            gold: 100
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('Error creating profile:', insertError);
+          setProfile(null);
+        } else {
+          console.log('Profile created successfully:', newProfile);
+          setProfile(newProfile);
+        }
       }
     } catch (error) {
       console.error('Error in fetchProfile:', error);
+      setProfile(null);
     } finally {
       setLoading(false);
     }

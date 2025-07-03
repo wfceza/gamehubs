@@ -26,46 +26,11 @@ export function useMultiplayerGame(gameId: string | null) {
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Fetch game data
-  const fetchGame = useCallback(async () => {
-    if (!gameId || !user) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('games')
-        .select('*')
-        .eq('id', gameId)
-        .single();
-
-      if (error) {
-        console.error('Error fetching game:', error);
-        return;
-      }
-
-      setGame(data);
-      if (data?.game_data) {
-        const gameData = data.game_data as GameState;
-        setGameState(gameData);
-        setIsMyTurn(gameData.currentPlayer === user.id);
-      } else {
-        // Initialize game state if it doesn't exist
-        const initialState = getInitialGameState(data, user.id);
-        setGameState(initialState);
-        setIsMyTurn(initialState.currentPlayer === user.id);
-        
-        // Update the database with initial state
-        await updateGameState(initialState);
-      }
-    } catch (error) {
-      console.error('Error fetching game:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [gameId, user]);
-
   // Get initial game state based on game type
-  const getInitialGameState = (game: Game, userId: string) => {
+  const getInitialGameState = useCallback((game: Game, userId: string) => {
     const opponentId = game.player1_id === userId ? game.player2_id : game.player1_id;
+    
+    console.log('Initializing game state for:', game.type, 'with players:', game.player1_id, game.player2_id);
     
     switch (game.type) {
       case 'tic_tac_toe':
@@ -81,6 +46,7 @@ export function useMultiplayerGame(gameId: string | null) {
       case 'rock_paper_scissors':
         return {
           gamePhase: 'choosing',
+          currentPlayer: game.player1_id,
           currentRound: 1,
           playerScores: {
             [game.player1_id]: 0,
@@ -94,6 +60,7 @@ export function useMultiplayerGame(gameId: string | null) {
       case 'number_guessing':
         return {
           gamePhase: 'guessing',
+          currentPlayer: game.player1_id,
           currentRound: 1,
           playerScores: {
             [game.player1_id]: 0,
@@ -107,6 +74,76 @@ export function useMultiplayerGame(gameId: string | null) {
       default:
         return {};
     }
+  }, []);
+
+  // Fetch game data
+  const fetchGame = useCallback(async () => {
+    if (!gameId || !user) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      console.log('Fetching game with ID:', gameId);
+      const { data, error } = await supabase
+        .from('games')
+        .select('*')
+        .eq('id', gameId)
+        .single();
+
+      if (error) {
+        console.error('Error fetching game:', error);
+        setLoading(false);
+        return;
+      }
+
+      console.log('Game fetched:', data);
+      setGame(data);
+      
+      // Check if game_data exists and is not empty
+      if (data?.game_data && Object.keys(data.game_data).length > 0) {
+        const gameData = data.game_data as GameState;
+        console.log('Using existing game data:', gameData);
+        setGameState(gameData);
+        setIsMyTurn(gameData.currentPlayer === user.id);
+      } else {
+        // Initialize game state if it doesn't exist or is empty
+        console.log('Initializing new game state for empty game_data');
+        const initialState = getInitialGameState(data, user.id);
+        console.log('Initial state created:', initialState);
+        setGameState(initialState);
+        setIsMyTurn(initialState.currentPlayer === user.id);
+        
+        // Update the database with initial state
+        await updateGameStateInDB(data.id, initialState);
+      }
+    } catch (error) {
+      console.error('Error fetching game:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [gameId, user, getInitialGameState]);
+
+  // Update game state in database
+  const updateGameStateInDB = async (gameId: string, newState: Partial<GameState>) => {
+    try {
+      console.log('Updating game state in DB:', gameId, newState);
+      const { error } = await supabase
+        .from('games')
+        .update({
+          game_data: newState,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', gameId);
+
+      if (error) {
+        console.error('Error updating game state in DB:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error updating game state:', error);
+      throw error;
+    }
   };
 
   // Update game state
@@ -114,6 +151,7 @@ export function useMultiplayerGame(gameId: string | null) {
     if (!game || !user) return;
 
     const updatedState = { ...gameState, ...newState };
+    console.log('Updating game state:', updatedState);
 
     try {
       const { error } = await supabase
@@ -132,9 +170,11 @@ export function useMultiplayerGame(gameId: string | null) {
           description: "Failed to update game state",
           variant: "destructive"
         });
+        throw error;
       }
     } catch (error) {
       console.error('Error updating game:', error);
+      throw error;
     }
   };
 
@@ -155,11 +195,13 @@ export function useMultiplayerGame(gameId: string | null) {
           filter: `id=eq.${gameId}`
         },
         (payload) => {
+          console.log('Realtime game update received:', payload);
           const updatedGame = payload.new as Game;
           setGame(updatedGame);
           
-          if (updatedGame.game_data) {
+          if (updatedGame.game_data && Object.keys(updatedGame.game_data).length > 0) {
             const newState = updatedGame.game_data as GameState;
+            console.log('Setting new state from realtime:', newState);
             setGameState(newState);
             setIsMyTurn(newState.currentPlayer === user?.id);
           }

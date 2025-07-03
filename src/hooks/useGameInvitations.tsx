@@ -98,7 +98,63 @@ export function useGameInvitations() {
 
         if (fetchError) throw fetchError;
 
-        // Create a new game
+        console.log('Creating game from invitation:', invitationData);
+
+        // Get initial game state based on game type
+        const getInitialGameState = (gameType: string, player1Id: string, player2Id: string) => {
+          switch (gameType) {
+            case 'tic_tac_toe':
+              return {
+                board: Array(9).fill(""),
+                currentPlayer: player1Id,
+                gamePhase: 'playing',
+                playerSymbols: {
+                  [player1Id]: 'X',
+                  [player2Id]: 'O'
+                }
+              };
+            case 'rock_paper_scissors':
+              return {
+                gamePhase: 'choosing',
+                currentPlayer: player1Id,
+                currentRound: 1,
+                playerScores: {
+                  [player1Id]: 0,
+                  [player2Id]: 0
+                },
+                roundData: {
+                  choices: {},
+                  results: []
+                }
+              };
+            case 'number_guessing':
+              return {
+                gamePhase: 'guessing',
+                currentPlayer: player1Id,
+                currentRound: 1,
+                playerScores: {
+                  [player1Id]: 0,
+                  [player2Id]: 0
+                },
+                roundData: {
+                  guesses: {},
+                  targetNumber: Math.floor(Math.random() * 100) + 1
+                }
+              };
+            default:
+              return {};
+          }
+        };
+
+        const initialGameData = getInitialGameState(
+          invitationData.game_type,
+          invitationData.sender_id,
+          invitationData.receiver_id
+        );
+
+        console.log('Initial game data:', initialGameData);
+
+        // Create a new game with initial state
         const { data: gameData, error: gameError } = await supabase
           .from('games')
           .insert({
@@ -106,12 +162,15 @@ export function useGameInvitations() {
             player1_id: invitationData.sender_id,
             player2_id: invitationData.receiver_id,
             stake_amount: invitationData.stake_amount,
-            status: 'in_progress'
+            status: 'in_progress',
+            game_data: initialGameData
           })
           .select()
           .single();
 
         if (gameError) throw gameError;
+
+        console.log('Game created successfully:', gameData);
 
         // Remove from local state immediately
         setInvitations(prev => prev.filter(inv => inv.id !== invitationId));
