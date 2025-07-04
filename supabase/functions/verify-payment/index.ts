@@ -1,6 +1,4 @@
-
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -19,13 +17,13 @@ serve(async (req) => {
   }
 
   try {
-    logStep("Starting payment verification");
+    logStep("Starting payment verification with Paystack");
     
-    const { sessionId } = await req.json();
-    if (!sessionId) {
-      throw new Error("Session ID is required");
+    const { reference } = await req.json();
+    if (!reference) {
+      throw new Error("Payment reference is required");
     }
-    logStep("Session ID received", { sessionId });
+    logStep("Payment reference received", { reference });
 
     // Use service role for secure operations
     const supabaseClient = createClient(
@@ -33,22 +31,20 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) {
-      throw new Error("Stripe secret key not configured");
+    const paystackKey = Deno.env.get("PAYSTACK_SECRET_KEY");
+    if (!paystackKey) {
+      throw new Error("Paystack secret key not configured");
     }
 
-    const stripe = new Stripe(stripeKey, { apiVersion: "2023-10-16" });
-    
     // Check if payment already processed (idempotency check)
     const { data: existingVerification } = await supabaseClient
       .from('payment_verifications')
       .select('*')
-      .eq('stripe_session_id', sessionId)
+      .eq('stripe_session_id', reference) // Reusing this field for Paystack reference
       .single();
 
     if (existingVerification) {
-      logStep("Payment already processed", { sessionId });
+      logStep("Payment already processed", { reference });
       return new Response(JSON.stringify({ 
         success: true, 
         message: "Payment already processed",
@@ -59,39 +55,44 @@ serve(async (req) => {
       });
     }
 
-    // Retrieve session from Stripe
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    logStep("Retrieved Stripe session", { 
-      status: session.payment_status,
-      customerEmail: session.customer_email 
+    // Verify transaction with Paystack
+    const paystackResponse = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${paystackKey}`,
+        "Content-Type": "application/json",
+      },
     });
 
-    if (session.payment_status !== 'paid') {
-      throw new Error("Payment not completed");
+    const paystackData = await paystackResponse.json();
+    logStep("Retrieved Paystack transaction", { 
+      status: paystackData.data?.status,
+      customerEmail: paystackData.data?.customer?.email 
+    });
+
+    if (!paystackData.status || paystackData.data.status !== 'success') {
+      throw new Error("Payment not completed or failed");
     }
 
     // Get user by email
     const { data: { users }, error: userError } = await supabaseClient.auth.admin.listUsers();
     if (userError) throw userError;
 
-    const user = users?.find(u => u.email === session.customer_email);
+    const user = users?.find(u => u.email === paystackData.data.customer.email);
     if (!user) {
       throw new Error("User not found");
     }
     logStep("User found", { userId: user.id, email: user.email });
 
-    // Calculate gold amount based on session amount
-    const amountInCents = session.amount_total || 0;
+    // Calculate gold amount from metadata or amount
+    const amountInKobo = paystackData.data.amount || 0;
     let goldAmount = 0;
 
-    // Validate and calculate gold amount securely
-    if (session.metadata?.goldAmount) {
-      goldAmount = parseInt(session.metadata.goldAmount);
-    } else if (session.metadata?.customAmount) {
-      goldAmount = parseInt(session.metadata.customAmount);
+    if (paystackData.data.metadata?.goldAmount) {
+      goldAmount = parseInt(paystackData.data.metadata.goldAmount);
     } else {
-      // Fallback calculation based on amount (1 cent = 1 gold)
-      goldAmount = amountInCents;
+      // Fallback calculation (10 kobo = 1 gold)
+      goldAmount = Math.floor(amountInKobo / 10);
     }
 
     // Security validation
@@ -99,34 +100,13 @@ serve(async (req) => {
       throw new Error("Invalid gold amount");
     }
 
-    // Verify amount matches expected calculation
-    const expectedAmount = goldAmount; // 1 gold = 1 cent
-    if (amountInCents !== expectedAmount) {
-      logStep("Amount mismatch detected", { 
-        expected: expectedAmount, 
-        actual: amountInCents 
-      });
-      
-      // Log security event
-      await supabaseClient.rpc('log_security_event', {
-        p_user_id: user.id,
-        p_event_type: 'payment_amount_mismatch',
-        p_event_data: {
-          session_id: sessionId,
-          expected_amount: expectedAmount,
-          actual_amount: amountInCents,
-          gold_amount: goldAmount
-        }
-      });
-    }
+    logStep("Calculated gold amount", { goldAmount, amountInKobo });
 
-    logStep("Calculated gold amount", { goldAmount, amountInCents });
-
-    // Record payment verification (prevents duplicate processing)
+    // Record payment verification
     const { error: verificationError } = await supabaseClient
       .from('payment_verifications')
       .insert({
-        stripe_session_id: sessionId,
+        stripe_session_id: reference, // Reusing this field for Paystack reference
         user_id: user.id,
         gold_amount: goldAmount
       });
@@ -160,11 +140,12 @@ serve(async (req) => {
       p_user_id: user.id,
       p_event_type: 'payment_processed',
       p_event_data: {
-        session_id: sessionId,
+        reference: reference,
         gold_amount: goldAmount,
         previous_gold: currentGold,
         new_gold: newGoldBalance,
-        amount_paid: amountInCents
+        amount_paid: amountInKobo,
+        payment_provider: 'paystack'
       }
     });
 
