@@ -1,6 +1,7 @@
 // supabase/functions/verify-payment/index.ts
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createHmac } from 'https://deno.land/std@0.177.0/node/crypto.ts';
 
 console.log(`[VERIFY-PAYMENT] Function starting up`);
 
@@ -42,7 +43,8 @@ serve(async (req) => {
     }
 
     // Parse the incoming request body as JSON (this is the Paystack webhook payload)
-    const event = await req.json();
+   const rawBody = await req.text(); // Get the raw request body
+  const event = JSON.parse(rawBody); // Then parse it as JSON
     console.log(`[VERIFY-PAYMENT] Received webhook event type: ${event.event}`);
 
     // --- Webhook Signature Verification (Highly Recommended for Production) ---
@@ -51,17 +53,20 @@ serve(async (req) => {
     // This typically involves hashing the raw request body with your Paystack secret key
     // and comparing it to the signature header.
     // For example:
-    /*
-    const crypto = await import('node:crypto'); // Deno equivalent might be `std/node/crypto.ts`
-    const signature = req.headers.get('x-paystack-signature');
-    const rawBody = await req.text(); // Get raw body before req.json()
-    const hash = crypto.createHmac('sha512', paystackSecretKey).update(rawBody).digest('hex');
-    if (hash !== signature) {
-        console.warn('[VERIFY-PAYMENT] Webhook signature mismatch. Possible tampering.');
-        return new Response(JSON.stringify({ success: false, error: 'Invalid signature' }), { status: 401 });
-    }
-    // After verification, you'd parse JSON from rawBody: const event = JSON.parse(rawBody);
-    */
+    // --- Webhook Signature Verification (Highly Recommended for Production) ---
+const signature = req.headers.get('x-paystack-signature');
+if (!signature) {
+    console.warn('[VERIFY-PAYMENT] Missing x-paystack-signature header. Rejecting request.');
+    return new Response(JSON.stringify({ success: false, error: 'Missing signature header' }), { status: 400 });
+}
+
+const hash = createHmac('sha512', paystackSecretKey).update(rawBody).digest('hex');
+if (hash !== signature) {
+    console.warn('[VERIFY-PAYMENT] Webhook signature mismatch. Possible tampering. Rejecting request.');
+    return new Response(JSON.stringify({ success: false, error: 'Invalid signature' }), { status: 401 });
+}
+console.log('[VERIFY-PAYMENT] Webhook signature verified successfully.');
+// -------------------------------------------------------------------------
     // For now, we proceed without signature verification for debugging simplicity.
     // -------------------------------------------------------------------------
 
