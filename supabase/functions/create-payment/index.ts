@@ -1,6 +1,4 @@
-
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -19,7 +17,7 @@ serve(async (req) => {
   }
 
   try {
-    logStep("Starting payment creation");
+    logStep("Starting payment creation with Paystack");
 
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -42,79 +40,61 @@ serve(async (req) => {
     let finalGoldAmount = 0;
     let finalPrice = 0;
 
-    // Validate and calculate amounts
+    // Validate and calculate amounts (in kobo for Paystack - 1 Naira = 100 kobo)
     if (goldAmount) {
-      // Predefined package
       const validAmounts = [100, 500, 1000, 2500, 5000];
       if (!validAmounts.includes(goldAmount)) {
         throw new Error("Invalid gold package selected");
       }
       finalGoldAmount = goldAmount;
-      finalPrice = goldAmount; // 1 gold = 1 cent
+      finalPrice = goldAmount * 10; // 1 gold = 10 kobo (0.1 Naira)
     } else if (customAmount) {
       const customGold = parseInt(customAmount);
       if (isNaN(customGold) || customGold < 10 || customGold > 100000) {
         throw new Error("Custom amount must be between 10 and 100,000 gold");
       }
       finalGoldAmount = customGold;
-      finalPrice = customGold; // 1 gold = 1 cent
+      finalPrice = customGold * 10; // 1 gold = 10 kobo
     } else {
       throw new Error("No valid amount specified");
     }
 
     logStep("Amount validated", { finalGoldAmount, finalPrice });
 
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) {
-      throw new Error("Stripe secret key not configured");
+    const paystackKey = Deno.env.get("PAYSTACK_SECRET_KEY");
+    if (!paystackKey) {
+      throw new Error("Paystack secret key not configured");
     }
 
-    const stripe = new Stripe(stripeKey, { apiVersion: "2023-10-16" });
-
-    // Check for existing customer
-    const customers = await stripe.customers.list({
-      email: user.email,
-      limit: 1
-    });
-
-    let customerId: string | undefined;
-    if (customers.data.length > 0) {
-      customerId = customers.data[0].id;
-      logStep("Existing customer found", { customerId });
-    } else {
-      logStep("No existing customer found, will create new one");
-    }
-
-    // Create checkout session with enhanced security
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      customer_email: customerId ? undefined : user.email,
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `${finalGoldAmount} Gold`,
-              description: `Purchase ${finalGoldAmount} gold for GameHub`
-            },
-            unit_amount: finalPrice,
-          },
-          quantity: 1,
-        },
-      ],
-      mode: "payment",
-      success_url: `${req.headers.get("origin")}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${req.headers.get("origin")}/`,
-      metadata: {
-        userId: user.id,
-        goldAmount: finalGoldAmount.toString(),
-        userEmail: user.email
+    // Create Paystack transaction
+    const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${paystackKey}`,
+        "Content-Type": "application/json",
       },
-      expires_at: Math.floor(Date.now() / 1000) + (30 * 60), // 30 minutes
+      body: JSON.stringify({
+        email: user.email,
+        amount: finalPrice, // Amount in kobo
+        currency: "NGN",
+        reference: `gold_${user.id}_${Date.now()}`,
+        callback_url: `${req.headers.get("origin")}/payment-success`,
+        metadata: {
+          userId: user.id,
+          goldAmount: finalGoldAmount,
+          userEmail: user.email
+        }
+      }),
     });
 
-    logStep("Checkout session created", { 
-      sessionId: session.id, 
+    const paystackData = await paystackResponse.json();
+
+    if (!paystackData.status) {
+      throw new Error(`Paystack error: ${paystackData.message}`);
+    }
+
+    logStep("Paystack transaction created", { 
+      reference: paystackData.data.reference,
       goldAmount: finalGoldAmount 
     });
 
@@ -128,14 +108,17 @@ serve(async (req) => {
       p_user_id: user.id,
       p_event_type: 'payment_initiated',
       p_event_data: {
-        session_id: session.id,
+        reference: paystackData.data.reference,
         gold_amount: finalGoldAmount,
-        price_cents: finalPrice,
-        customer_id: customerId
+        price_kobo: finalPrice,
+        payment_provider: 'paystack'
       }
     });
 
-    return new Response(JSON.stringify({ url: session.url }), {
+    return new Response(JSON.stringify({ 
+      url: paystackData.data.authorization_url,
+      reference: paystackData.data.reference
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
