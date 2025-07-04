@@ -157,7 +157,7 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ 
       success: true, 
-      goldAmount,
+            goldAmount,
       newBalance: newGoldBalance
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
