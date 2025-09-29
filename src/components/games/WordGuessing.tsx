@@ -110,6 +110,7 @@ const WordGuessing = ({ currentUser, stakeAmount, opponentId, gameId, onGameEnd 
     const newState = {
       gamePhase: shouldEndGame ? 'finished' : 'waiting',
       currentPlayer: shouldEndGame ? currentPlayer : (currentRound % 2 === 0 ? currentUser.id : opponentId),
+      currentPlayer: shouldEndGame ? null : (currentRound % 2 === 0 ? currentUser.id : opponentId),
       playerScores: newScores,
       roundData: {
         ...roundData,

@@ -32,44 +32,90 @@ export function useGameResult() {
       }
 
       // Process gold transactions
-      if (winnerId) {
-        // Update winner's gold and stats
-        const { error: winnerError } = await supabase.rpc('process_game_win', {
-          p_user_id: winnerId,
-          p_gold_amount: stakeAmount
-        });
+      if (winnerId && winnerId !== 'tie') {
+        // Get current profiles to update gold properly
+        const { data: winnerProfile } = await supabase
+          .from('profiles')
+          .select('gold, wins, games_played')
+          .eq('id', winnerId)
+          .single();
 
-        if (winnerError) {
-          console.error('Error processing winner:', winnerError);
-          throw winnerError;
+        const { data: loserProfile } = await supabase
+          .from('profiles')
+          .select('gold, losses, games_played')
+          .eq('id', winnerId === player1Id ? player2Id : player1Id)
+          .single();
+
+        if (winnerProfile) {
+          // Update winner: add double stake, increment wins and games
+          const { error: winnerError } = await supabase
+            .from('profiles')
+            .update({
+              gold: winnerProfile.gold + (stakeAmount * 2),
+              wins: winnerProfile.wins + 1,
+              games_played: winnerProfile.games_played + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', winnerId);
+
+          if (winnerError) {
+            console.error('Error processing winner:', winnerError);
+            throw winnerError;
+          }
         }
 
-        // Update loser's gold and stats
-        const loserId = winnerId === player1Id ? player2Id : player1Id;
-        const { error: loserError } = await supabase.rpc('process_game_loss', {
-          p_user_id: loserId,
-          p_gold_amount: stakeAmount
-        });
+        if (loserProfile) {
+          // Update loser: deduct stake, increment losses and games
+          const loserId = winnerId === player1Id ? player2Id : player1Id;
+          const { error: loserError } = await supabase
+            .from('profiles')
+            .update({
+              gold: Math.max(loserProfile.gold - stakeAmount, 0),
+              losses: loserProfile.losses + 1,
+              games_played: loserProfile.games_played + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', loserId);
 
-        if (loserError) {
-          console.error('Error processing loser:', loserError);
-          throw loserError;
+          if (loserError) {
+            console.error('Error processing loser:', loserError);
+            throw loserError;
+          }
         }
 
         console.log('Game result processed successfully');
       } else {
         // Handle tie - just update games played for both players
-        const { error: tieError1 } = await supabase.rpc('process_game_tie', {
-          p_user_id: player1Id
-        });
-        
-        const { error: tieError2 } = await supabase.rpc('process_game_tie', {
-          p_user_id: player2Id
-        });
+         const { data: player1Profile } = await supabase
+          .from('profiles')
+          .select('games_played')
+          .eq('id', player1Id)
+          .single();
 
-        if (tieError1 || tieError2) {
-          console.error('Error processing tie:', tieError1 || tieError2);
-          throw tieError1 || tieError2;
+        const { data: player2Profile } = await supabase
+          .from('profiles')
+          .select('games_played')
+          .eq('id', player2Id)
+          .single();
+
+        if (player1Profile) {
+          await supabase
+            .from('profiles')
+            .update({
+              games_played: player1Profile.games_played + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', player1Id);
+        }
+
+        if (player2Profile) {
+          await supabase
+            .from('profiles')
+            .update({
+              games_played: player2Profile.games_played + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', player2Id);
         }
       }
 

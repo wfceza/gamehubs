@@ -7,6 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import { Trophy, User, RotateCcw, Clock } from "lucide-react";
 import { useMultiplayerGame } from "@/hooks/useMultiplayerGame";
 import { useAuth } from "@/hooks/useAuth";
+import { useGameResult } from "@/hooks/useGameResult";
 import { supabase } from "@/integrations/supabase/client";
 
 interface MultiplayerRockPaperScissorsProps {
@@ -20,6 +21,7 @@ interface MultiplayerRockPaperScissorsProps {
 const MultiplayerRockPaperScissors = ({ currentUser, stakeAmount, opponentId, gameId, onGameEnd }: MultiplayerRockPaperScissorsProps) => {
   const { user } = useAuth();
   const { game, gameState, loading, updateGameState } = useMultiplayerGame(gameId);
+  const { processGameResult } = useGameResult();
   const [opponent, setOpponent] = useState<any>(null);
   const [myChoice, setMyChoice] = useState<string | null>(null);
 
@@ -164,6 +166,10 @@ const MultiplayerRockPaperScissors = ({ currentUser, stakeAmount, opponentId, ga
         // Update player stats and gold
         if (winnerId) {
           await updatePlayerStats(winnerId);
+        }
+         // Process game result (gold and stats)
+        if (winnerId && winnerId !== 'tie') {
+          await processGameResult(game.id, winnerId, stakeAmount, game.player1_id, game.player2_id);
         }
 
         if (winnerId === user.id) {
