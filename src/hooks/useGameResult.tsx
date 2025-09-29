@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -33,18 +32,24 @@ export function useGameResult() {
 
       // Process gold transactions
       if (winnerId && winnerId !== 'tie') {
+        const loserId = winnerId === player1Id ? player2Id : player1Id;
+        console.log('Winner ID:', winnerId, 'Loser ID:', loserId);
+        
         // Get current profiles to update gold properly
-        const { data: winnerProfile } = await supabase
+        const { data: winnerProfile, error: winnerFetchError } = await supabase
           .from('profiles')
           .select('gold, wins, games_played')
           .eq('id', winnerId)
           .single();
 
-        const { data: loserProfile } = await supabase
+        const { data: loserProfile, error: loserFetchError } = await supabase
           .from('profiles')
           .select('gold, losses, games_played')
-          .eq('id', winnerId === player1Id ? player2Id : player1Id)
+          .eq('id', loserId)
           .single();
+
+        console.log('Winner profile:', winnerProfile, 'Winner fetch error:', winnerFetchError);
+        console.log('Loser profile:', loserProfile, 'Loser fetch error:', loserFetchError);
 
         if (winnerProfile) {
           // Update winner: add double stake, increment wins and games
@@ -61,12 +66,13 @@ export function useGameResult() {
           if (winnerError) {
             console.error('Error processing winner:', winnerError);
             throw winnerError;
+          } else {
+            console.log('Winner updated successfully - new gold:', winnerProfile.gold + (stakeAmount * 2));
           }
         }
 
         if (loserProfile) {
           // Update loser: deduct stake, increment losses and games
-          const loserId = winnerId === player1Id ? player2Id : player1Id;
           const { error: loserError } = await supabase
             .from('profiles')
             .update({
@@ -80,13 +86,15 @@ export function useGameResult() {
           if (loserError) {
             console.error('Error processing loser:', loserError);
             throw loserError;
+          } else {
+            console.log('Loser updated successfully - new gold:', Math.max(loserProfile.gold - stakeAmount, 0));
           }
         }
 
         console.log('Game result processed successfully');
       } else {
         // Handle tie - just update games played for both players
-         const { data: player1Profile } = await supabase
+        const { data: player1Profile } = await supabase
           .from('profiles')
           .select('games_played')
           .eq('id', player1Id)
