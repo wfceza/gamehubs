@@ -35,95 +35,42 @@ export function useGameResult() {
         const loserId = winnerId === player1Id ? player2Id : player1Id;
         console.log('Winner ID:', winnerId, 'Loser ID:', loserId);
         
-        // Get current profiles to update gold properly
-        const { data: winnerProfile, error: winnerFetchError } = await supabase
-          .from('profiles')
-          .select('gold, wins, games_played')
-          .eq('id', winnerId)
-          .single();
+         const { error: winRpcError } = await (supabase as any).rpc('process_game_win', {
+          p_user_id: winnerId,
+          p_gold_amount: stakeAmount * 2
+        });
 
-        const { data: loserProfile, error: loserFetchError } = await supabase
-          .from('profiles')
-          .select('gold, losses, games_played')
-          .eq('id', loserId)
-          .single();
-
-        console.log('Winner profile:', winnerProfile, 'Winner fetch error:', winnerFetchError);
-        console.log('Loser profile:', loserProfile, 'Loser fetch error:', loserFetchError);
-
-        if (winnerProfile) {
-          // Update winner: add double stake, increment wins and games
-          const { error: winnerError } = await supabase
-            .from('profiles')
-            .update({
-              gold: winnerProfile.gold + (stakeAmount * 2),
-              wins: winnerProfile.wins + 1,
-              games_played: winnerProfile.games_played + 1,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', winnerId);
-
-          if (winnerError) {
-            console.error('Error processing winner:', winnerError);
-            throw winnerError;
-          } else {
-            console.log('Winner updated successfully - new gold:', winnerProfile.gold + (stakeAmount * 2));
-          }
+        if (winRpcError) {
+          console.error('Error crediting winner via RPC:', winRpcError);
+          throw winRpcError;
+        } else {
+          console.log('Winner credited via RPC with:', stakeAmount * 2);
         }
 
-        if (loserProfile) {
-          // Update loser: deduct stake, increment losses and games
-          const { error: loserError } = await supabase
-            .from('profiles')
-            .update({
-              gold: Math.max(loserProfile.gold - stakeAmount, 0),
-              losses: loserProfile.losses + 1,
-              games_played: loserProfile.games_played + 1,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', loserId);
+        // Deduct loser (stake)
+        const { error: lossRpcError } = await (supabase as any).rpc('process_game_loss', {
+          p_user_id: loserId,
+          p_gold_amount: stakeAmount
+        });
 
-          if (loserError) {
-            console.error('Error processing loser:', loserError);
-            throw loserError;
-          } else {
-            console.log('Loser updated successfully - new gold:', Math.max(loserProfile.gold - stakeAmount, 0));
-          }
+        if (lossRpcError) {
+          console.error('Error deducting loser via RPC:', lossRpcError);
+          throw lossRpcError;
+        } else {
+          console.log('Loser deducted via RPC with:', stakeAmount);
         }
 
-        console.log('Game result processed successfully');
+        console.log('Game result processed successfully via RPC');
       } else {
-        // Handle tie - just update games played for both players
-        const { data: player1Profile } = await supabase
-          .from('profiles')
-          .select('games_played')
-          .eq('id', player1Id)
-          .single();
+        // Tie: increment games_played for both via RPC
+        const [{ error: tieErr1 }, { error: tieErr2 }] = await Promise.all([
+          (supabase as any).rpc('process_game_tie', { p_user_id: player1Id }),
+          (supabase as any).rpc('process_game_tie', { p_user_id: player2Id })
+        ]);
 
-        const { data: player2Profile } = await supabase
-          .from('profiles')
-          .select('games_played')
-          .eq('id', player2Id)
-          .single();
-
-        if (player1Profile) {
-          await supabase
-            .from('profiles')
-            .update({
-              games_played: player1Profile.games_played + 1,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', player1Id);
-        }
-
-        if (player2Profile) {
-          await supabase
-            .from('profiles')
-            .update({
-              games_played: player2Profile.games_played + 1,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', player2Id);
+        if (tieErr1 || tieErr2) {
+          console.error('Error processing tie via RPC:', tieErr1, tieErr2);
+          throw tieErr1 || tieErr2;
         }
       }
 
