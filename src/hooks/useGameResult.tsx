@@ -46,18 +46,17 @@ export function useGameResult() {
         } else {
           console.log('Winner credited via RPC with:', stakeAmount * 2);
         }
-
-        // Deduct loser (stake)
-        const { error: lossRpcError } = await (supabase as any).rpc('process_game_loss', {
-          p_user_id: loserId,
-          p_gold_amount: stakeAmount
+        // Update loser's stats only (no gold change - stake already deducted at start)
+        const loserId = winnerId === player1Id ? player2Id : player1Id;
+        const { error: loserStatsError } = await (supabase as any).rpc('update_loser_stats', {
+          p_user_id: loserId
         });
 
-        if (lossRpcError) {
-          console.error('Error deducting loser via RPC:', lossRpcError);
-          throw lossRpcError;
+        if (loserStatsError) {
+          console.error('Error updating loser stats via RPC:', loserStatsError);
+          throw loserStatsError;
         } else {
-          console.log('Loser deducted via RPC with:', stakeAmount);
+          console.log('Loser stats updated (no gold refund)');
         }
 
         console.log('Game result processed successfully via RPC');

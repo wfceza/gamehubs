@@ -349,6 +349,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      update_loser_stats: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       friend_request_status: "pending" | "accepted" | "rejected"
