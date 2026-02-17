@@ -32,8 +32,6 @@ export function useGameResult() {
 
       // Process gold transactions
       if (winnerId && winnerId !== 'tie') {
-        const loserId = winnerId === player1Id ? player2Id : player1Id;
-        console.log('Winner ID:', winnerId, 'Loser ID:', loserId);
         
          const { error: winRpcError } = await (supabase as any).rpc('process_game_win', {
           p_user_id: winnerId,

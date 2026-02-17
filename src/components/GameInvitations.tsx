@@ -16,56 +16,6 @@ interface GameInvitationsProps {
 const GameInvitations = ({ currentUser, onGameStart }: GameInvitationsProps) => {
   const { invitations, sentInvitations, loading, respondToInvitation } = useGameInvitations();
 
-  // Enhanced listener for game creation to redirect both players
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const channel = supabase
-      .channel('game_creation_events')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'games'
-        },
-        (payload) => {
-          const game = payload.new;
-          console.log('New game created:', game);
-          
-          // Check if current user is involved in this game
-          if (game.player1_id === currentUser.id || game.player2_id === currentUser.id) {
-            console.log('Current user is involved in the game, redirecting...');
-            
-            // Convert database game type to frontend game type
-            const gameTypeMap = {
-              'tic_tac_toe': 'tic-tac-toe',
-              'rock_paper_scissors': 'rock-paper-scissors',
-              'number_guessing': 'number-guessing'
-            };
-            
-            const frontendGameType = gameTypeMap[game.type] || game.type;
-            const opponentId = game.player1_id === currentUser.id ? game.player2_id : game.player1_id;
-            
-            toast({
-              title: "Game Started!",
-              description: "Redirecting to game...",
-            });
-            
-            // Small delay to ensure the toast is visible before redirect
-            setTimeout(() => {
-              onGameStart(frontendGameType, game.stake_amount, opponentId, game.id);
-            }, 500);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser, onGameStart]);
-
   const formatGameType = (gameType: string) => {
     const gameNames = {
       'tic_tac_toe': 'Tic Tac Toe',

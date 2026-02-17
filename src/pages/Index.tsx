@@ -8,6 +8,7 @@ import SidebarNavigation from "@/components/SidebarNavigation";
 import GameManager from "@/components/GameManager";
 import PageRenderer from "@/components/PageRenderer";
 import ProfileLoader from "@/components/ProfileLoader";
+import GameInvitePopup from "@/components/GameInvitePopup";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -87,6 +88,8 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
+      {/* Global Game Invite Popup */}
+      <GameInvitePopup currentUser={profile} onGameStart={handleGameStart} />
       {/* Navigation Header */}
       <Navigation
         profile={profile}
