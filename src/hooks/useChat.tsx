@@ -1,8 +1,9 @@
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from './useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Tables } from '@/integrations/supabase/types';
+import { toast } from '@/hooks/use-toast';
 
 type ChatMessage = Tables<'chat_messages'>;
 type Profile = Tables<'profiles'>;
@@ -11,13 +12,16 @@ export function useChat() {
   const { user } = useAuth();
   const [friends, setFriends] = useState<Profile[]>([]);
   const [messages, setMessages] = useState<{ [key: string]: ChatMessage[] }>({});
+  const [unreadCounts, setUnreadCounts] = useState<{ [key: string]: number }>({});
   const [loading, setLoading] = useState(true);
   const processedMessageIds = useRef(new Set<string>());
+  const [activeChatFriendId, setActiveChatFriendId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
       fetchFriends();
-      setupRealtimeSubscription();
+      const cleanup = setupRealtimeSubscription();
+      return cleanup;
     }
   }, [user]);
 
@@ -25,7 +29,6 @@ export function useChat() {
     if (!user) return;
 
     try {
-      // Get friends through friendships table
       const { data: friendships, error } = await supabase
         .from('friendships')
         .select(`
@@ -41,7 +44,6 @@ export function useChat() {
         return;
       }
 
-      // Extract friend profiles
       const friendProfiles: Profile[] = [];
       friendships?.forEach(friendship => {
         if (friendship.user1_id === user.id && friendship.user2) {
@@ -53,7 +55,6 @@ export function useChat() {
 
       setFriends(friendProfiles);
 
-      // Fetch messages for each friend
       for (const friend of friendProfiles) {
         await fetchMessagesWithFriend(friend.id);
       }
@@ -84,7 +85,6 @@ export function useChat() {
         [friendId]: data || []
       }));
 
-      // Mark messages as processed
       data?.forEach(message => {
         processedMessageIds.current.add(message.id);
       });
@@ -113,8 +113,12 @@ export function useChat() {
         return { error: error.message };
       }
 
-      // Mark message as processed to avoid duplication
+      // Mark as processed and immediately add to local state
       processedMessageIds.current.add(data.id);
+      setMessages(prev => ({
+        ...prev,
+        [receiverId]: [...(prev[receiverId] || []), data]
+      }));
 
       return { error: null };
     } catch (error) {
@@ -124,10 +128,10 @@ export function useChat() {
   };
 
   const setupRealtimeSubscription = () => {
-    if (!user) return;
+    if (!user) return () => {};
 
     const channel = supabase
-      .channel('chat_messages')
+      .channel('chat_messages_realtime')
       .on(
         'postgres_changes',
         {
@@ -138,12 +142,8 @@ export function useChat() {
         (payload) => {
           const newMessage = payload.new as ChatMessage;
           
-          // Prevent duplicate processing
-          if (processedMessageIds.current.has(newMessage.id)) {
-            return;
-          }
+          if (processedMessageIds.current.has(newMessage.id)) return;
           
-          // Only update if the message involves the current user
           if (newMessage.sender_id === user.id || newMessage.receiver_id === user.id) {
             const otherUserId = newMessage.sender_id === user.id ? newMessage.receiver_id : newMessage.sender_id;
             
@@ -153,6 +153,22 @@ export function useChat() {
               ...prev,
               [otherUserId]: [...(prev[otherUserId] || []), newMessage]
             }));
+
+            // Show toast notification for incoming messages
+            if (newMessage.sender_id !== user.id) {
+              // Increment unread count
+              setUnreadCounts(prev => ({
+                ...prev,
+                [newMessage.sender_id]: (prev[newMessage.sender_id] || 0) + 1
+              }));
+
+              // Find sender name from friends
+              const senderFriend = friends.find(f => f.id === newMessage.sender_id);
+              toast({
+                title: `💬 ${senderFriend?.username || 'Friend'}`,
+                description: newMessage.content?.substring(0, 50) || 'Sent a message',
+              });
+            }
           }
         }
       )
@@ -163,11 +179,27 @@ export function useChat() {
     };
   };
 
+  // Re-setup subscription when friends list changes (to get names for notifications)
+  useEffect(() => {
+    if (!user || friends.length === 0) return;
+    const cleanup = setupRealtimeSubscription();
+    return cleanup;
+  }, [user, friends]);
+
+  const clearUnreadCount = useCallback((friendId: string) => {
+    setUnreadCounts(prev => ({ ...prev, [friendId]: 0 }));
+  }, []);
+
+  const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+
   return {
     friends,
     messages,
     loading,
     sendMessage,
+    unreadCounts,
+    totalUnreadCount,
+    clearUnreadCount,
     refetch: fetchFriends
   };
 }

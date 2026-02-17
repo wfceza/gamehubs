@@ -7,6 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import { Trophy, RotateCcw, User } from "lucide-react";
 import { useMultiplayerGame } from "@/hooks/useMultiplayerGame";
 import { useAuth } from "@/hooks/useAuth";
+import { useGameResult } from "@/hooks/useGameResult";
 import { supabase } from "@/integrations/supabase/client";
 
 interface MultiplayerTicTacToeProps {
@@ -20,74 +21,29 @@ interface MultiplayerTicTacToeProps {
 const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, onGameEnd }: MultiplayerTicTacToeProps) => {
   const { user } = useAuth();
   const { game, gameState, isMyTurn, loading, updateGameState } = useMultiplayerGame(gameId);
+  const { processGameResult, processing } = useGameResult();
   const [opponent, setOpponent] = useState<any>(null);
+  const [resultProcessed, setResultProcessed] = useState(false);
 
   // Fetch opponent data
   useEffect(() => {
     const fetchOpponent = async () => {
       if (!opponentId) return;
-      
       const { data: opponentData } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', opponentId)
         .single();
-      
       setOpponent(opponentData);
     };
-
     fetchOpponent();
   }, [opponentId]);
 
-  const updatePlayerStats = async (winnerId: string | null) => {
-    try {
-      // Update current user stats
-      const currentUserWins = winnerId === currentUser.id ? currentUser.wins + 1 : currentUser.wins;
-      const currentUserGold = winnerId === currentUser.id ? 
-        currentUser.gold + (stakeAmount * 2) : 
-        winnerId ? currentUser.gold - stakeAmount : currentUser.gold;
-
-      const { error: currentUserError } = await supabase
-        .from('profiles')
-        .update({
-          wins: currentUserWins,
-          games_played: currentUser.games_played + 1,
-          gold: currentUserGold
-        })
-        .eq('id', currentUser.id);
-
-      if (currentUserError) {
-        console.error('Error updating current user stats:', currentUserError);
-      }
-
-      // Update opponent stats
-      const opponentWins = winnerId === opponentId ? (opponent?.wins || 0) + 1 : (opponent?.wins || 0);
-      const opponentGold = winnerId === opponentId ? 
-        (opponent?.gold || 0) + (stakeAmount * 2) : 
-        winnerId ? (opponent?.gold || 0) - stakeAmount : (opponent?.gold || 0);
-
-      const { error: opponentError } = await supabase
-        .from('profiles')
-        .update({
-          wins: opponentWins,
-          games_played: (opponent?.games_played || 0) + 1,
-          gold: opponentGold
-        })
-        .eq('id', opponentId);
-
-      if (opponentError) {
-        console.error('Error updating opponent stats:', opponentError);
-      }
-    } catch (error) {
-      console.error('Error updating player stats:', error);
-    }
-  };
-
   const checkWinner = (board: string[]) => {
     const winPatterns = [
-      [0, 1, 2], [3, 4, 5], [6, 7, 8], // Rows
-      [0, 3, 6], [1, 4, 7], [2, 5, 8], // Columns
-      [0, 4, 8], [2, 4, 6] // Diagonals
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
     ];
 
     for (const pattern of winPatterns) {
@@ -117,22 +73,23 @@ const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, on
     const nextPlayer = gameState.currentPlayer === game.player1_id ? game.player2_id : game.player1_id;
 
     if (winner) {
-      let winnerId = null;
+      let winnerId: string | null = null;
       if (winner !== "tie") {
         winnerId = Object.keys(gameState.playerSymbols || {}).find(
           playerId => gameState.playerSymbols?.[playerId] === winner
-        );
+        ) || null;
       }
 
       await updateGameState({
         board: newBoard,
         gamePhase: 'finished',
-        winner: winnerId,
+        winner: winnerId || 'tie',
         currentPlayer: null
       }, 'completed');
 
-      // Update player stats and gold
-      await updatePlayerStats(winnerId);
+      // Use RPC to process game result (stakes already deducted at start)
+      await processGameResult(gameId, winnerId, stakeAmount, game.player1_id, game.player2_id);
+      setResultProcessed(true);
 
       if (winnerId === user.id) {
         toast({
@@ -148,7 +105,7 @@ const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, on
       } else {
         toast({
           title: "It's a Tie!",
-          description: "No one wins this round.",
+          description: "Stakes have been refunded.",
         });
       }
     } else {
@@ -160,9 +117,31 @@ const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, on
     }
   };
 
+  // Handle forfeit when clicking "Back to Lobby" during an active game
+  const handleBackToLobby = async () => {
+    if (game && gameState.gamePhase === 'playing' && user && !resultProcessed) {
+      // Forfeit: current player loses, opponent wins
+      const { data, error } = await (supabase as any).rpc('handle_game_forfeit', {
+        p_game_id: gameId,
+        p_forfeit_player_id: user.id
+      });
+
+      if (error) {
+        console.error('Forfeit error:', error);
+      } else {
+        toast({
+          title: "Game Forfeited",
+          description: `You lost ${stakeAmount} Gold.`,
+          variant: "destructive"
+        });
+      }
+    }
+    onGameEnd();
+  };
+
   const resetGame = async () => {
     if (!game) return;
-
+    setResultProcessed(false);
     const initialState = {
       board: Array(9).fill(""),
       currentPlayer: game.player1_id,
@@ -170,7 +149,6 @@ const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, on
       playerSymbols: gameState.playerSymbols,
       winner: null
     };
-
     await updateGameState(initialState, 'in_progress');
   };
 
@@ -217,7 +195,7 @@ const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, on
               <div className="text-lg sm:text-xl font-bold text-blue-400 mb-2">
                 {gameState.gamePhase === 'finished' ? (
                   gameState.winner === user?.id ? "🎉 You Win!" :
-                  gameState.winner ? `😔 ${opponent?.username || "Opponent"} Wins!` :
+                  gameState.winner && gameState.winner !== 'tie' ? `😔 ${opponent?.username || "Opponent"} Wins!` :
                   "🤝 It's a Tie!"
                 ) : (
                   isMyTurn ? "Your Turn" : `Waiting for ${opponent?.username || "opponent"}...`
@@ -265,7 +243,7 @@ const MultiplayerTicTacToe = ({ currentUser, stakeAmount, opponentId, gameId, on
               )}
               
               <Button 
-                onClick={onGameEnd}
+                onClick={handleBackToLobby}
                 className="bg-gray-600 hover:bg-gray-700 text-white"
               >
                 Back to Lobby

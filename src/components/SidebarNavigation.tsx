@@ -1,6 +1,8 @@
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Gamepad2, Users, MessageCircle, User, Trophy } from "lucide-react";
+import { useChat } from "@/hooks/useChat";
 
 interface NavigationItem {
   id: string;
@@ -14,6 +16,8 @@ interface SidebarNavigationProps {
 }
 
 const SidebarNavigation = ({ currentPage, onPageChange }: SidebarNavigationProps) => {
+  const { totalUnreadCount } = useChat();
+
   const navigationItems: NavigationItem[] = [
     { id: "lobby", label: "Game Lobby", icon: Gamepad2 },
     { id: "friends", label: "Friends", icon: Users },
@@ -39,6 +43,11 @@ const SidebarNavigation = ({ currentPage, onPageChange }: SidebarNavigationProps
           >
             <Icon className="w-4 h-4 mr-2" />
             {item.label}
+            {item.id === "chat" && totalUnreadCount > 0 && (
+              <Badge className="bg-red-500 text-white text-xs ml-auto px-1.5 py-0.5 min-w-[20px] flex items-center justify-center">
+                {totalUnreadCount}
+              </Badge>
+            )}
           </Button>
         );
       })}

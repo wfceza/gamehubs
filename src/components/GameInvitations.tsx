@@ -16,6 +16,8 @@ interface GameInvitationsProps {
 const GameInvitations = ({ currentUser, onGameStart }: GameInvitationsProps) => {
   const { invitations, sentInvitations, loading, respondToInvitation } = useGameInvitations();
 
+  // Game creation redirect is now handled globally by GameInvitePopup
+
   const formatGameType = (gameType: string) => {
     const gameNames = {
       'tic_tac_toe': 'Tic Tac Toe',

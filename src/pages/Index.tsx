@@ -44,8 +44,8 @@ const Index = () => {
     refetch();
   };
 
+  const { signOut } = useAuth();
   const handleSignOut = async () => {
-    const { signOut } = useAuth();
     await signOut();
   };
 
@@ -90,6 +90,7 @@ const Index = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
       {/* Global Game Invite Popup */}
       <GameInvitePopup currentUser={profile} onGameStart={handleGameStart} />
+
       {/* Navigation Header */}
       <Navigation
         profile={profile}
